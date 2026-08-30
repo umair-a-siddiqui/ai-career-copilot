@@ -20,7 +20,9 @@ load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 client = AsyncOpenAI(api_key=API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
 set_tracing_disabled(True)
-brain = OpenAIChatCompletionsModel(model="gemini-2.5-flash-lite", openai_client=client)
+# Change this line:
+brain = OpenAIChatCompletionsModel(model="gemini-3.5-flash-lite", openai_client=client)
+
 # ---------- Single Master Agent (Fast & Free) ----------
 master_agent = Agent(
     name="JobJet Master",

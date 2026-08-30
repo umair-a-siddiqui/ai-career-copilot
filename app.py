@@ -1,8 +1,8 @@
 # app.py — JobJet 🚀 | AI Career Copilot
-import os, re, asyncio
+import os, re, time, asyncio
 import streamlit as st
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 from agents import Agent, Runner, OpenAIChatCompletionsModel, set_tracing_disabled
 from pypdf import PdfReader
 import docx
@@ -44,8 +44,18 @@ def read_file(f):
         return "\n".join(p.text for p in docx.Document(f).paragraphs)
     return f.read().decode("utf-8", errors="ignore")
 
-def run_agent(agent, context):
-    return Runner.run_sync(agent, context).final_output
+def run_agent(agent, context, retries=4):
+    """Run one agent, auto-retrying if the free tier is rate-limited."""
+    delay = 10
+    for attempt in range(retries):
+        try:
+            return Runner.run_sync(agent, context).final_output
+        except RateLimitError:
+            if attempt == retries - 1:
+                raise
+            st.toast(f"⏳ Free-tier limit hit — waiting {delay}s, then retrying…")
+            time.sleep(delay)
+            delay = min(delay * 2, 60)
 
 def extract_score(text):
     m = re.search(r"MATCH SCORE:\s*(\d{1,3})", text, re.I) or re.search(r"(\d{1,3})\s*/\s*100", text)
@@ -140,13 +150,22 @@ if run:
                  ("🎤 Prepping your interview…", coach, "interview")]
         results = {}
         prog = st.progress(0.0, text="Assembling your AI team…")
-        for i, (msg, agent, key) in enumerate(steps):
-            prog.progress(i / len(steps), text=msg)
-            results[key] = run_agent(agent, context)
-        prog.progress(1.0, text="Done! 🎉")
-        results["score"] = extract_score(results["analysis"])
-        st.session_state["results"] = results
-        st.balloons()
+        try:
+            for i, (msg, agent, key) in enumerate(steps):
+                prog.progress(i / len(steps), text=msg)
+                results[key] = run_agent(agent, context)
+                time.sleep(1)  # gentle pacing so we stay under the free-tier limit
+            prog.progress(1.0, text="Done! 🎉")
+            results["score"] = extract_score(results["analysis"])
+            st.session_state["results"] = results
+            st.balloons()
+        except RateLimitError:
+            prog.empty()
+            st.error("⏳ Gemini's free tier is busy right now (rate limit). "
+                     "Please wait about a minute, then click **Run** again.")
+        except Exception as e:
+            prog.empty()
+            st.error(f"Something went wrong: {e}")
 
 # ---------- show results ----------
 res = st.session_state.get("results")

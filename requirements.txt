@@ -1,0 +1,5 @@
+openai-agents
+python-dotenv
+streamlit
+pypdf
+python-docx

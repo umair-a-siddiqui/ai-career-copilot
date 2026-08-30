@@ -1,6 +1,8 @@
-# app.py — JobJet 🚀 | AI Career Copilot
+# app.py — JobJet 🚀 | AI Career Copilot with Auto Link Scraping
 import os, re, asyncio
 import streamlit as st
+import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, RateLimitError
 from agents import Agent, Runner, OpenAIChatCompletionsModel, set_tracing_disabled
@@ -18,7 +20,7 @@ load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 client = AsyncOpenAI(api_key=API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
 set_tracing_disabled(True)
-brain = OpenAIChatCompletionsModel(model="gemini-2.0-flash", openai_client=client)
+brain = OpenAIChatCompletionsModel(model="gemini-2.5-flash", openai_client=client)
 
 # ---------- AI Agents Team ----------
 analyst = Agent(
@@ -54,7 +56,25 @@ coach = Agent(
     instructions="""Give 5 likely interview questions for this job, each with a 1-line tip on how to answer. Use markdown."""
 )
 
-# ---------- Helper Functions ----------
+# ---------- Helper Functions & Auto Web Scraper ----------
+def fetch_text_from_url(url):
+    """Scrapes readable text from a job URL (LinkedIn, job boards, careers pages)."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            for script in soup(["script", "style", "nav", "footer", "header"]):
+                script.extract()
+            text = soup.get_text(separator=" ", strip=True)
+            return re.sub(r"\s+", " ", text)
+        else:
+            return None
+    except Exception:
+        return None
+
 def read_file(f):
     if f is None: return ""
     name = f.name.lower()
@@ -89,20 +109,17 @@ def extract_score(text):
     m = re.search(r"MATCH SCORE:\s*(\d{1,3})", text, re.I) or re.search(r"(\d{1,3})\s*/\s*100", text)
     return max(0, min(100, int(m.group(1)))) if m else None
 
-# ---------- Page Setup & Advanced Glassmorphism UI ----------
+# ---------- Page Setup & SaaS Styling ----------
 st.set_page_config(page_title="JobJet — AI Career Copilot", page_icon="🚀", layout="wide")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-}
+html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
 #MainMenu, footer, header { visibility: hidden; }
 .block-container { padding-top: 1.5rem; max-width: 1100px; }
 
-/* Executive Header */
 .hero-box {
     text-align: center;
     padding: 35px 20px 20px 20px;
@@ -118,7 +135,6 @@ html, body, [class*="css"] {
 }
 .hero-box p { color: #94a3b8; font-size: 1.15rem; margin-top: 8px; }
 
-/* Textarea styling */
 .stTextArea textarea {
     background-color: #11141a !important;
     border: 1px solid #232834 !important;
@@ -131,7 +147,6 @@ html, body, [class*="css"] {
     box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.25) !important;
 }
 
-/* Action Button Glow */
 .stButton > button {
     background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%) !important;
     color: #ffffff !important;
@@ -149,7 +164,6 @@ html, body, [class*="css"] {
     box-shadow: 0 6px 30px rgba(168, 85, 247, 0.6) !important;
 }
 
-/* Tab Container Styling */
 .stTabs [data-baseweb="tab-list"] {
     background-color: #11141a;
     padding: 8px;
@@ -205,9 +219,9 @@ with c1:
                  placeholder="Paste resume text or upload a file above...")
 
 with c2:
-    st.subheader("💼 Job Description")
+    st.subheader("💼 Job Description / URL")
     st.text_area("Job text", key="job_text", height=336, label_visibility="collapsed",
-                 placeholder="Paste the full job description text here (avoid raw links)...")
+                 placeholder="Paste job posting text OR paste a direct job link (LinkedIn, Indeed, etc.)...")
 
 _, bcol, _ = st.columns([1, 2, 1])
 with bcol:
@@ -216,12 +230,25 @@ with bcol:
 # ---------- Run Pipeline ----------
 if run:
     resume = st.session_state.get("resume_text", "").strip()
-    job = st.session_state.get("job_text", "").strip()
+    job_input = st.session_state.get("job_text", "").strip()
     
-    if not resume or not job:
-        st.warning("Please provide BOTH your resume and full job description text.")
+    if not resume or not job_input:
+        st.warning("Please provide BOTH your resume and a job description (or link).")
     else:
-        with st.spinner("⚡ AI Agents are analyzing keywords and rewriting content..."):
+        # Check if the input is a URL
+        if job_input.startswith("http://") or job_input.startswith("https://"):
+            with st.spinner("🔗 Extracting job details from URL..."):
+                fetched = fetch_text_from_url(job_input)
+                if fetched and len(fetched) > 100:
+                    job = fetched
+                    st.info("🌐 Job details extracted successfully from the link!")
+                else:
+                    job = job_input
+                    st.warning("⚠️ Could not scrape full text directly from URL (login wall active). Proceeding with raw input...")
+        else:
+            job = job_input
+
+        with st.spinner("⚡ AI Agents are analyzing keywords and tailoring content..."):
             context = f"RESUME:\n{resume}\n\nJOB POSTING:\n{job}"
             try:
                 loop = asyncio.get_event_loop()
@@ -234,12 +261,11 @@ if run:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# ---------- Modern Results Dashboard ----------
+# ---------- Results Dashboard ----------
 res = st.session_state.get("results")
 if res:
     st.markdown("---")
     
-    # Custom Dynamic Score Card
     if res.get("score") is not None:
         score = res["score"]
         score_color = "#22c55e" if score >= 80 else "#f59e0b" if score >= 60 else "#ef4444"

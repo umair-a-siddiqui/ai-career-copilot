@@ -44,18 +44,29 @@ def read_file(f):
         return "\n".join(p.text for p in docx.Document(f).paragraphs)
     return f.read().decode("utf-8", errors="ignore")
 
-def run_agent(agent, context, retries=4):
-    """Run one agent, auto-retrying if the free tier is rate-limited."""
+async def run_agent(agent, context, retries=4):
+    """Run one agent (async), auto-retrying if the free tier is rate-limited."""
     delay = 10
     for attempt in range(retries):
         try:
-            return Runner.run_sync(agent, context).final_output
+            result = await Runner.run(agent, context)
+            return result.final_output
         except RateLimitError:
             if attempt == retries - 1:
                 raise
-            st.toast(f"⏳ Free-tier limit hit — waiting {delay}s, then retrying…")
-            time.sleep(delay)
+            await asyncio.sleep(delay)
             delay = min(delay * 2, 60)
+
+async def run_team(context):
+    """Fire all 4 agents at the SAME time (parallel) instead of one-by-one."""
+    analysis, resume_out, cover_out, interview_out = await asyncio.gather(
+        run_agent(analyst, context),
+        run_agent(tailor, context),
+        run_agent(cover, context),
+        run_agent(coach, context),
+    )
+    return {"analysis": analysis, "resume": resume_out,
+            "cover": cover_out, "interview": interview_out}
 
 def extract_score(text):
     m = re.search(r"MATCH SCORE:\s*(\d{1,3})", text, re.I) or re.search(r"(\d{1,3})\s*/\s*100", text)
@@ -144,27 +155,17 @@ if run:
         st.warning("Please provide BOTH your resume and a job posting.")
     else:
         context = f"RESUME:\n{resume}\n\nJOB POSTING:\n{job}"
-        steps = [("🕵️ Analyzing your fit…", analyst, "analysis"),
-                 ("✍️ Tailoring your resume…", tailor, "resume"),
-                 ("💌 Writing your cover letter…", cover, "cover"),
-                 ("🎤 Prepping your interview…", coach, "interview")]
-        results = {}
-        prog = st.progress(0.0, text="Assembling your AI team…")
         try:
-            for i, (msg, agent, key) in enumerate(steps):
-                prog.progress(i / len(steps), text=msg)
-                results[key] = run_agent(agent, context)
-                time.sleep(1)  # gentle pacing so we stay under the free-tier limit
-            prog.progress(1.0, text="Done! 🎉")
+            with st.spinner("🤖 Your AI team is working — all 4 agents at once…"):
+                loop = asyncio.get_event_loop()
+                results = loop.run_until_complete(run_team(context))
             results["score"] = extract_score(results["analysis"])
             st.session_state["results"] = results
             st.balloons()
         except RateLimitError:
-            prog.empty()
             st.error("⏳ Gemini's free tier is busy right now (rate limit). "
                      "Please wait about a minute, then click **Run** again.")
         except Exception as e:
-            prog.empty()
             st.error(f"Something went wrong: {e}")
 
 # ---------- show results ----------

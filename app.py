@@ -98,14 +98,23 @@ async def run_agent(agent, context, retries=5):
                 raise e
 
 async def run_team(context):
-    analysis, resume_out, cover_out, interview_out = await asyncio.gather(
-        run_agent(analyst, context),
-        run_agent(tailor, context),
-        run_agent(cover, context),
-        run_agent(coach, context),
-    )
-    return {"analysis": analysis, "resume": resume_out,
-            "cover": cover_out, "interview": interview_out}
+    analysis = await run_agent(analyst, context)
+    await asyncio.sleep(1)  # Brief delay to stay within rate limits
+    
+    resume_out = await run_agent(tailor, context)
+    await asyncio.sleep(1)
+    
+    cover_out = await run_agent(cover, context)
+    await asyncio.sleep(1)
+    
+    interview_out = await run_agent(coach, context)
+    
+    return {
+        "analysis": analysis, 
+        "resume": resume_out,
+        "cover": cover_out, 
+        "interview": interview_out
+    }
 
 def extract_score(text):
     m = re.search(r"MATCH SCORE:\s*(\d{1,3})", text, re.I) or re.search(r"(\d{1,3})\s*/\s*100", text)

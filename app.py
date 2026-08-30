@@ -18,7 +18,7 @@ load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 client = AsyncOpenAI(api_key=API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
 set_tracing_disabled(True)
-brain = OpenAIChatCompletionsModel(model="gemini-3.6-flash", openai_client=client)
+brain = OpenAIChatCompletionsModel(model="gemini-3.1-flash-lite", openai_client=client)
 
 # ---------- the AI team ----------
 analyst = Agent(name="Analyst", model=brain, instructions="""

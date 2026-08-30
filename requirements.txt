@@ -3,3 +3,5 @@ python-dotenv
 streamlit
 pypdf
 python-docx
+requests
+beautifulsoup4

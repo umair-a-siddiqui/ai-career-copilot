@@ -4,7 +4,7 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, RateLimitError
+from openai import AsyncOpenAI, RateLimitError, APIError
 from agents import Agent, Runner, OpenAIChatCompletionsModel, set_tracing_disabled
 from pypdf import PdfReader
 import docx
@@ -84,16 +84,18 @@ def read_file(f):
         return "\n".join(p.text for p in docx.Document(f).paragraphs)
     return f.read().decode("utf-8", errors="ignore")
 
-async def run_agent(agent, context, retries=3):
-    delay = 5
+async def run_agent(agent, context, retries=5):
+    delay = 3
     for attempt in range(retries):
         try:
             result = await Runner.run(agent, context)
             return result.final_output
-        except RateLimitError:
-            if attempt == retries - 1: raise
-            await asyncio.sleep(delay)
-            delay *= 2
+        except (RateLimitError, APIError, Exception) as e:
+            if attempt < retries - 1:
+                await asyncio.sleep(delay)
+                delay *= 2  # Exponential backoff: Waits 3s, 6s, 12s, 24s
+            else:
+                raise e
 
 async def run_team(context):
     analysis, resume_out, cover_out, interview_out = await asyncio.gather(
